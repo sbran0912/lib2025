@@ -6,15 +6,15 @@ import * as utils from './lib-utils.ts'
 export interface Shape {
     typ: string;
     location: lb2d.Vector; 
-    vertices?: lb2d.Vector[];
+    vertices: lb2d.Vector[];
     velocity: lb2d.Vector;
     angVelocity: number;
-    radius?: number;
+    radius: number;
     accel: lb2d.Vector;
     angAccel: number;
     mass: number;
     inertia: number;
-    orientation?: lb2d.Vector;
+    orientation: lb2d.Vector;
     display: () => void;
     rotate: (angle: number) => void;
     applyForce: (force: lb2d.Vector, angForce: number) => void;
@@ -27,7 +27,7 @@ const COEFFICIENT = 0.005;                      //Reibungskoeffizient
 const GRAVITY = new lb2d.Vector(0, 0.025);       //Gravitation
 
 
-export class Box implements Shape{
+export class Box {
     typ: string;
     vertices: lb2d.Vector[];
     location: lb2d.Vector;
@@ -98,7 +98,7 @@ export class Box implements Shape{
     }
 }
 
-export class Ball implements Shape {
+export class Ball {
     typ: string;
     location: lb2d.Vector;
     velocity: lb2d.Vector;
@@ -537,6 +537,7 @@ function createShadow(shape:Shape) {
             } 
         }    
     }
+    
     return shadow;
 }
 
