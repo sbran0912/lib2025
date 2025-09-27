@@ -1,0 +1,17 @@
+import * as lb2d from './lib-2d.ts';
+import * as utils from './lib-utils.ts';
+
+function draw() {
+  lb2d.background("silver");
+  x = x + 0.01;
+  y = y + 0.01;
+  lb2d.circle(utils.map(perlin.noise(x),-1,1,0,lb2d.getWidth()), utils.map(perlin.noise(y),-1,1,0,lb2d.getHeight()), 20,2);
+}
+
+// Programmstart
+const perlin = new utils.PerlinNoise();
+let x = 0;
+let y = 1000;
+lb2d.init(800, 500);
+lb2d.startAnimation(draw);
+
