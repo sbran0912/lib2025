@@ -3,6 +3,10 @@
 import * as lb2d from './lib-2d.ts';
 import * as utils from './lib-utils.ts'
 
+// Konstanten
+const COEFFICIENT = 0.5;                      //Reibungskoeffizient
+const GRAVITY = new lb2d.Vector(0, 0.025);       //Gravitation
+
 export interface Shape {
     typ: string;
     location: lb2d.Vector; 
@@ -21,11 +25,6 @@ export interface Shape {
     resetPos: (v: lb2d.Vector) => void;
     update: () => void;
 }
-
-// Konstanten
-const COEFFICIENT = 0.005;                      //Reibungskoeffizient
-const GRAVITY = new lb2d.Vector(0, 0.025);       //Gravitation
-
 
 export class Box implements Shape{
     typ: string;
@@ -118,7 +117,7 @@ export class Ball implements Shape {
         this.radius = radius;
         this.accel = new lb2d.Vector(0, 0);
         this.angAccel = 0;
-        this.mass = radius * 2;
+        this.mass = (radius * radius)/4;
         this.inertia = radius * radius * radius/2;
         this.orientation = new lb2d.Vector(radius + x, 0 + y);     
     }
@@ -237,7 +236,7 @@ function resolveCollisionBox(boxA: Shape, boxB: Shape, cp: lb2d.Vector, normal: 
     let VgesamtB = lb2d.addVector(boxB.velocity, VtanB);
     const velocity_AB = lb2d.subVector(VgesamtA, VgesamtB);
     if (lb2d.dotProduct(velocity_AB, normal) < 0) { // wenn negativ, dann auf Kollisionskurs
-        let e = 1; //inelastischer Stoß
+        let e = 0.7; //inelastischer Stoß
         let j_denominator = lb2d.dotProduct(lb2d.multVector(velocity_AB, -(1+e)), normal);
         let j_divLinear = lb2d.dotProduct(normal, lb2d.multVector(normal, (1/boxA.mass + 1/boxB.mass)));
         let j_divAngular = Math.pow(lb2d.dotProduct(rAP_perp, normal), 2) / boxA.inertia + Math.pow(lb2d.dotProduct(rBP_perp, normal), 2) / boxB.inertia;
@@ -296,7 +295,7 @@ function resolveCollisionBall(a: Shape, b: Shape, normal: lb2d.Vector) {
     const velocity_AB = lb2d.subVector(VgesamtA, VgesamtB);
 
     if (lb2d.dotProduct(velocity_AB, normal) < 0) { // wenn negativ, dann auf Kollisionskurs
-        const e = 1; //inelastischer Stoß
+        const e = 0.7; //inelastischer Stoß
         const j_denominator = lb2d.dotProduct(lb2d.multVector(velocity_AB, -(1+e)), normal);
         const j_divLinear = lb2d.dotProduct(normal, lb2d.multVector(normal, (1/a.mass + 1/b.mass)));
         const j = j_denominator / j_divLinear;
@@ -376,7 +375,7 @@ function resolveCollisionBallBox(ball: Shape, box: Shape, cp: lb2d.Vector, norma
 
     if (lb2d.dotProduct(velocity_AB, normal) < 0) { // wenn negativ, dann auf Kollisionskurs
 
-        const e = 1; //inelastischer Stoß
+        const e = 0.7; //inelastischer Stoß
         const j_denominator = lb2d.dotProduct(lb2d.multVector(velocity_AB, -(1+e)), normal);
         const j_divLinear = lb2d.dotProduct(normal, lb2d.multVector(normal, (1/ball.mass + 1/box.mass)));
         const j_divAngular = Math.pow(lb2d.dotProduct(rBP_perp, normal), 2) / box.inertia; //nur für Box zu rechnen

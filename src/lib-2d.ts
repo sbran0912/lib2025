@@ -17,10 +17,20 @@ function setMouseUp() {
 
 function updTouchPos(e:TouchEvent) {
   e.preventDefault();
+  const target = e.target as HTMLElement;
+  const touch = e.targetTouches[0];
+  const rect = target.getBoundingClientRect();
+
+  mouseX = touch.pageX - rect.left;
+  mouseY = touch.pageY - rect.top;
+
+  /* Alte Version
+  e.preventDefault();
   //@ts-ignore
   mouseX = e.targetTouches[0].pageX - e.target.getBoundingClientRect().left;
   //@ts-ignore
   mouseY = e.targetTouches[0].pageY - e.target.getBoundingClientRect().top;
+  */
 }
 
 function setTouchDown(e:TouchEvent) {
@@ -47,7 +57,8 @@ function parseColor(...color:(string|number)[]) {
 
 // Instanzvariablen des Moduls
 const canv = document.querySelector("canvas") as HTMLCanvasElement;
-const output = document.querySelector("#output") as HTMLParagraphElement;
+const output = document.querySelector("#output") as HTMLLabelElement;
+const checkboxes = document.querySelector("#checkbox") as HTMLFieldSetElement;
 const ctx = canv.getContext("2d") as CanvasRenderingContext2D;
 export let mouseX = 0;
 export let mouseY = 0;
@@ -114,9 +125,26 @@ export function isMouseUp():boolean {
 }
 
 export function createP(item:string) {
-  const newItem = document.createElement("p");
-  newItem.textContent = item;
+  const newItem = document.createTextNode(item);
   output.appendChild(newItem);
+}
+
+export function createCheckbox(attribut: string, text: string) {
+  const label = document.createElement('label');
+  const input = document.createElement('input');
+
+  input.setAttribute('name', attribut);
+  input.setAttribute('type', 'checkbox');
+  input.setAttribute('role', 'switch'); // Für das Styling, z.B. bei Frameworks
+
+  const labelText = document.createTextNode(text);
+
+  label.appendChild(input);
+  label.appendChild(labelText);
+
+  //Das fertige Label zum Container (z.B. zum Body) hinzufügen
+  checkboxes.appendChild(label);
+
 }
 
 /** saves the current drawing state. Use together with pop 

@@ -1,13 +1,13 @@
-import * as lb2d from './lib-2d';
-import * as phys from './lib-phys';
-import * as utils from './lib-utils'
+import * as lb2d from './lib-2d.ts';
+import * as phys from './lib-phys.ts';
+import * as utils from './lib-utils.ts';
 
 function draw() {
-  lb2d.background();
+  lb2d.background("whitesmoke");
   checkKicking(shapes);
   phys.checkCollision(shapes);
   phys.checkWalls(shapes, walls);
-  //phys.applyGravity(shapes);
+  phys.applyGravity(shapes);
   //phys.applyFriction(shapes);
   //phys.applyDragforce(shapes);
   phys.update(shapes);
@@ -55,3 +55,17 @@ shapes.push(
 lb2d.init(800, 500);
 lb2d.strokeWidth(1.5);
 lb2d.startAnimation(draw);
+
+lb2d.createCheckbox('debug', 'Debug Modus');
+const debugCheckbox = document.querySelector('input[name="debug"]') as HTMLInputElement;
+const istDebugAktiv = debugCheckbox.checked;
+console.log("Aktueller Zustand der Checkbox:", istDebugAktiv);
+
+debugCheckbox.addEventListener('change', (e: Event) => {
+  const targetElement = e.target as HTMLInputElement;
+  if (targetElement.checked) {
+    console.log("Debug-Modus wurde EINGESCHALTET. 🟢");
+  } else {
+    console.log("Debug-Modus wurde AUSGESCHALTET. 🔴");
+  }
+});
