@@ -508,6 +508,7 @@ export function createKicking(): (shapes: Shape[]) => void {
         if (std.isMouseUp() && index != null) {
             let mouse = new std.Vector(std.mouseX, std.mouseY);
             let force = std.subVector(mouse, shapes[index].location);
+            force.mult(3);
             shapes[index].applyForce(force, 0);
             index = null;
             return;
