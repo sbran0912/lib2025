@@ -20,11 +20,11 @@ export class Vehicle {
         this.velocity = new std.Vector(-1 + Math.random() * 3, -1 + Math.random() * 3);
         this.accel = new std.Vector(0, 0);
         this.radius = r;
-        this.max_steer = 0.8;
+        this.max_steer = 1.2;
         this.max_desired = 6.0;
     }
 
-    draw() {
+    display() {
         const points: std.Vector[] = new Array(3);
         const vel = this.velocity.copy();
         vel.setMag(this.radius);
@@ -43,7 +43,7 @@ export class Vehicle {
 
     update() {
         this.velocity.add(this.accel);
-        this.velocity.limit(20);
+        this.velocity.limit(5);
         this.accel.set(0,0);
         this.location.add(this.velocity);
     }
@@ -53,11 +53,80 @@ export class Vehicle {
         this.accel.add(force);
     }
 
-    seek(target: std.Vector) {
+    /**
+     * Seek-Force will be multiplied by weigth 
+     */
+    seek(target: std.Vector, weigth: number) {
         const desired = std.subVector(target, this.location);
         desired.setMag(this.max_desired);
         const steer = std.subVector(desired, this.velocity);
-        steer.mult(this.max_steer);
+        steer.mult(this.max_steer * weigth);
         this.applyForce(steer);
+    }
+
+    /**
+     * Separate-Force will be multiplied by weigth 
+     */
+    separate(vehicles: Vehicle[], weigth: number) {
+        const minDistance = 40;
+        const diff_sum = new std.Vector(0, 0);
+        let count = 0;
+        for (const other_vehicle of vehicles) {
+            const distance = this.location.dist(other_vehicle.location);
+            if (distance > 0 && distance < minDistance) {
+                const diff = std.subVector(this.location, other_vehicle.location);
+                diff.normalize();
+                diff_sum.add(diff);
+                count++;
+            }
+        }
+        if (count > 0) {
+            diff_sum.div(count); // average vector
+            diff_sum.setMag(this.max_desired);
+            const steer = std.subVector(diff_sum, this.velocity);
+            steer.mult(this.max_steer * weigth);
+            this.applyForce(steer);
+        }
+    }
+
+    allign(vehicles: Vehicle[], weigth: number) {
+        const minDistance = 50;
+        let count = 0;
+        const sum_vel = new std.Vector(0, 0);
+        for (const other_vehicle of vehicles) {
+            const distance = this.location.dist(other_vehicle.location);
+            if (distance > 0 && distance < minDistance) {
+                sum_vel.add(other_vehicle.velocity);
+                count++;
+            }
+            
+        }
+        if (count > 0) {
+            sum_vel.div(vehicles.length);
+            sum_vel.setMag(this.max_desired);
+            const steer = std.subVector(sum_vel, this.velocity);
+            steer.mult(this.max_steer * weigth);
+            this.applyForce(steer);
+        }
+    }
+
+    cohesion(vehicles: Vehicle[], weigth: number) {
+        const minDistance = 50;
+        let count = 0;
+        const sum_loc = new std.Vector(0, 0);
+        for (const other_vehicle of vehicles) {
+            const distance = this.location.dist(other_vehicle.location);
+            if (distance > 0 && distance < minDistance) {
+                sum_loc.add(other_vehicle.location);
+                count++;
+            }
+        }
+        if (count > 0) {
+            sum_loc.div(vehicles.length);
+            sum_loc.setMag(this.max_desired);
+            const steer = std.subVector(sum_loc, this.velocity);
+            steer.mult(this.max_steer * weigth);
+            this.applyForce(steer);
+        }
     }
 }

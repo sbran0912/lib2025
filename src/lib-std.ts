@@ -356,16 +356,24 @@ export class Vector {
     return Math.sqrt(this.magSq());
   }
 
+  /**
+   * adds Vector v to this
+   */
   add(v:Vector) {
     this.x += v.x;
     this.y += v.y;
   }
 
+  /**
+   * substracts Vector v from this
+   */
   sub(v:Vector) {
     this.x -= v.x;
     this.y -= v.y;
   }
-
+  /**
+   * @returns distance from this to Vector v
+   */
   dist(v:Vector):number {
     const vdist = this.copy();
     vdist.sub(v);
@@ -450,6 +458,9 @@ export function addVector(v1:Vector, v2:Vector) {
   return new Vector(v1.x + v2.x, v1.y + v2.y);
 }
 
+/**
+ * @returns Vector (v1 minus v2)
+ */
 export function subVector(v1:Vector, v2:Vector) {
   return new Vector(v1.x - v2.x, v1.y - v2.y);
 }
@@ -500,24 +511,26 @@ export function crossProduct(v1:Vector, v2:Vector):number {
 
 /** Mindistance between point p and line a(a0->a1)
  */
-export function minDist(p:Vector, a0:Vector, a1:Vector):number {
-  let dist = 0;
+export function minDist(p:Vector, a0:Vector, a1:Vector):[number, Vector] {
+  let dist = -1;
+  let normalPoint = new Vector(0, 0);
 
   //Vektor line a0 to a1
   const a0a1 = subVector(a1, a0);
-  //Vektor imaginary line a0 to p
+  //Vektor line a0 to p
   const a0p = subVector(p, a0);
   //Magnitude of line a0 to a1
   const magnitude = a0a1.mag();
 
-  //Scalarprojecton from line a0p to line a0a1
+  //Scalarproduct from line a0p to line a0a1
   a0a1.normalize();
-  const sp = a0a1.dot(a0p);
+  const sp = a0p.dot(a0a1);
 
   //Scalarprojection in magnitude of line a0a1?
   if (sp > 0 && sp <= magnitude) {
     a0a1.mult(sp);
-    dist = subVector(a0p, a0a1).mag();
+    normalPoint = addVector(a0, a0a1);
+    dist = p.dist(normalPoint);
   }
-  return dist;
+  return [dist, normalPoint];
 }
