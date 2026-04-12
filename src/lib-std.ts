@@ -356,24 +356,16 @@ export class Vector {
     return Math.sqrt(this.magSq());
   }
 
-  /**
-   * adds Vector v to this
-   */
   add(v:Vector) {
     this.x += v.x;
     this.y += v.y;
   }
 
-  /**
-   * substracts Vector v from this
-   */
   sub(v:Vector) {
     this.x -= v.x;
     this.y -= v.y;
   }
-  /**
-   * @returns distance from this to Vector v
-   */
+
   dist(v:Vector):number {
     const vdist = this.copy();
     vdist.sub(v);
@@ -458,9 +450,6 @@ export function addVector(v1:Vector, v2:Vector) {
   return new Vector(v1.x + v2.x, v1.y + v2.y);
 }
 
-/**
- * @returns Vector (v1 minus v2)
- */
 export function subVector(v1:Vector, v2:Vector) {
   return new Vector(v1.x - v2.x, v1.y - v2.y);
 }

@@ -1,594 +1,770 @@
-// Version: 1.0 Stand Februar 2023
+// lib-phys.ts – Port von phys.go (Stand April 2026)
+// Verwendet Vector aus lib-std.ts statt raylib Vector2
 
-import * as std from './lib-std.ts';
-import * as utils from './lib-utils.ts'
+import { Vector, addVector, subVector, multVector } from "./lib-std.ts";
+import * as std from "./lib-std.ts";
 
-// Konstanten
-const COEFFICIENT = 0.5;                      //Reibungskoeffizient
-const GRAVITY = new std.Vector(0, 0.025);       //Gravitation
+// ─── Hilfsfunktionen (Ersatz für raylib Vector2-Funktionen) ──────────────────
+
+function vec(x: number, y: number): Vector { return new Vector(x, y); }
+
+function v2add(a: Vector, b: Vector): Vector { return addVector(a, b); }
+function v2sub(a: Vector, b: Vector): Vector { return subVector(a, b); }
+function v2scale(a: Vector, s: number): Vector { return multVector(a, s); }
+function v2dot(a: Vector, b: Vector): number  { return a.dot(b); }
+function v2len(a: Vector): number             { return a.mag(); }
+
+function v2norm(a: Vector): Vector {
+  const v = a.copy();
+  v.normalize();
+  return v;
+}
+
+function v2rot(v: Vector, angle: number): Vector {
+  return vec(
+    v.x * Math.cos(angle) - v.y * Math.sin(angle),
+    v.x * Math.sin(angle) + v.y * Math.cos(angle),
+  );
+}
+
+const INF = Number.MAX_VALUE;
+
+// ─── Interfaces ──────────────────────────────────────────────────────────────
 
 export interface Shape {
-    typ: string;
-    location: std.Vector; 
-    vertices?: std.Vector[];
-    velocity: std.Vector;
-    angVelocity: number;
-    radius?: number;
-    accel: std.Vector;
-    angAccel: number;
-    mass: number;
-    inertia: number;
-    orientation?: std.Vector;
-    display: () => void;
-    rotate: (angle: number) => void;
-    applyForce: (force: std.Vector, angForce: number) => void;
-    resetPos: (v: std.Vector) => void;
-    update: () => void;
+  update(): void;
+  draw(color: string, thick: number): void;
+  rotate(angle: number): void;
+  applyForce(force: Vector, angForce: number): void;
+  resetPos(delta: Vector): void;
+  applyGravity(gravity: Vector): void;
+  clearState(): void;
 }
 
-export class Box implements Shape{
-    typ: string;
-    vertices: std.Vector[];
-    location: std.Vector;
-    velocity: std.Vector;
-    angVelocity: number;
-    accel: std.Vector;
-    angAccel: number;
-    mass: number;
-    inertia: number;
+interface BasicShape {
+  location:    Vector;
+  velocity:    Vector;
+  angVelocity: number;
+  accel:       Vector;
+  angAccel:    number;
+  mass:        number;
+  inertia:     number;
+  isGrounded:  boolean;
+}
 
-    constructor (x: number, y: number, w: number, h: number) {
-        this.typ = "Box";
-        this.vertices = new Array(5);
-        this.vertices[0] = new std.Vector(x, y);
-        this.vertices[1] = new std.Vector(x + w, y);
-        this.vertices[2] = new std.Vector(x + w, y + h);
-        this.vertices[3] = new std.Vector(x, y + h);
-        this.vertices[4] = this.vertices[0];
-        this.location = new std.Vector(x + w / 2, y + h / 2);
-        this.velocity = new std.Vector(0, 0);
-        this.angVelocity = 0;
-        this.accel = new std.Vector(0, 0);
-        this.angAccel = 0;
-        this.mass = (w + h)*2;
-        this.inertia = w * h * w;
+// ─── Polygon ─────────────────────────────────────────────────────────────────
+
+export class Polygon implements Shape {
+  basic:    BasicShape;
+  vertices: Vector[];
+
+  constructor(x: number, y: number, w: number, h: number, wall: boolean) {
+    const mass    = wall ? INF : w * h;
+    const inertia = wall ? INF : mass * (w * w + h * h) / 2;
+
+    this.basic = {
+      location:    vec(x + w / 2, y + h / 2),
+      velocity:    vec(0, 0),
+      angVelocity: 0,
+      accel:       vec(0, 0),
+      angAccel:    0,
+      mass,
+      inertia,
+      isGrounded:  false,
+    };
+
+    this.vertices = [
+      vec(x,     y),
+      vec(x + w, y),
+      vec(x + w, y + h),
+      vec(x,     y + h),
+    ];
+  }
+
+  applyForce(force: Vector, angForce: number) {
+    this.basic.accel = v2add(this.basic.accel, force);
+    this.basic.angAccel += angForce;
+  }
+
+  update() {
+    this.basic.velocity    = v2add(this.basic.velocity, this.basic.accel);
+    this.basic.angVelocity += this.basic.angAccel;
+
+    this.basic.velocity    = v2scale(this.basic.velocity, 0.9995);
+    this.basic.location    = v2add(this.basic.location, this.basic.velocity);
+    for (let i = 0; i < this.vertices.length; i++) {
+      this.vertices[i] = v2add(this.vertices[i], this.basic.velocity);
     }
+    this.basic.angVelocity *= 0.9995;
+    this.rotate(this.basic.angVelocity);
 
-    rotate(angle: number) {
-        for (let i = 0; i < 4; i++) {
-            this.vertices[i].rotateMatrix(this.location, angle);
+    this.basic.accel    = vec(0, 0);
+    this.basic.angAccel = 0;
+  }
+
+  draw(color: string, thick: number) {
+    const n = this.vertices.length;
+    std.strokeColor(color);
+    std.strokeWidth(thick);
+    for (let i = 0; i < n; i++) {
+      const a = this.vertices[i];
+      const b = this.vertices[(i + 1) % n];
+      std.line(a.x, a.y, b.x, b.y);
+    }
+    // Mittelpunkt
+    std.fillColor(color);
+    std.circle(this.basic.location.x, this.basic.location.y, 3, 1);
+  }
+
+  rotate(angle: number) {
+    for (let i = 0; i < this.vertices.length; i++) {
+      const rel     = v2sub(this.vertices[i], this.basic.location);
+      const rotated = v2rot(rel, angle);
+      this.vertices[i] = v2add(rotated, this.basic.location);
+    }
+  }
+
+  resetPos(delta: Vector) {
+    for (let i = 0; i < this.vertices.length; i++) {
+      this.vertices[i] = v2add(this.vertices[i], delta);
+    }
+    this.basic.location = v2add(this.basic.location, delta);
+  }
+
+  applyGravity(gravity: Vector) {
+    if (this.basic.mass < INF) {
+      if (!this.basic.isGrounded) {
+        this.applyForce(gravity, 0);
+      } else {
+        if (v2len(this.basic.velocity) < 0.5 &&
+            Math.abs(this.basic.angVelocity) < 0.1) {
+          this.basic.velocity    = vec(0, 0);
+          this.basic.angVelocity = 0;
+        } else {
+          const dampingForce    = v2scale(this.basic.velocity, -0.5);
+          const dampingAngForce = this.basic.angVelocity * -0.5;
+          this.applyForce(dampingForce, dampingAngForce);
         }
+      }
     }
+  }
 
-    update() {
-        this.velocity.add(this.accel);
-        this.velocity.limit(10);
-        this.accel.set(0,0);
-        this.angVelocity += this.angAccel;
-        this.angVelocity = utils.limitNum(this.angVelocity, 0.05);
-        this.angAccel = 0;
-
-        this.location.add(this.velocity);
-        this.vertices[0].add(this.velocity);
-        this.vertices[1].add(this.velocity);
-        this.vertices[2].add(this.velocity);
-        this.vertices[3].add(this.velocity);
-        this.rotate(this.angVelocity);
-    }
-
-    display() {
-        std.shape(this.vertices[0].x, this.vertices[0].y, this.vertices[1].x, this.vertices[1].y, this.vertices[2].x, this.vertices[2].y, this.vertices[3].x, this.vertices[3].y, 0);
-        std.circle(this.location.x, this.location.y, 2, 0);
-    }
-
-    applyForce(force: std.Vector, angForce: number) {
-        this.accel.add(std.divVector(force, this.mass));
-        this.angAccel += angForce / this.mass; 
-    }
-
-    resetPos(v: std.Vector) {
-        if (this.mass != Infinity) {
-            this.location.add(v);
-            this.vertices[0].add(v);
-            this.vertices[1].add(v);
-            this.vertices[2].add(v);
-            this.vertices[3].add(v);    
-        }
-    }
+  clearState() {
+    this.basic.isGrounded = false;
+  }
 }
 
-export class Ball implements Shape {
-    typ: string;
-    location: std.Vector;
-    velocity: std.Vector;
-    angVelocity: number;
-    radius: number;
-    accel: std.Vector;
-    angAccel: number;
-    mass: number;
-    inertia: number;
-    orientation: std.Vector;
+// ─── Circle ──────────────────────────────────────────────────────────────────
 
-    constructor(x: number, y: number, radius: number) {
-        this.typ = "Ball";
-        this.location = new std.Vector(x, y);
-        this.velocity = new std.Vector(0, 0);
-        this.angVelocity = 0;
-        this.radius = radius;
-        this.accel = new std.Vector(0, 0);
-        this.angAccel = 0;
-        this.mass = (radius * radius)/4;
-        this.inertia = radius * radius * radius/2;
-        this.orientation = new std.Vector(radius + x, 0 + y);     
-    }
-    
-    display() {
-        std.circle(this.location.x, this.location.y, this.radius, 0);
-        std.line(this.location.x, this.location.y, this.orientation.x, this.orientation.y);
-    }
+export class Circle implements Shape {
+  basic:       BasicShape;
+  radius:      number;
+  orientation: Vector;   // Punkt auf Kreisrand (für Rotationsanzeige)
 
-    rotate(angle: number) {
-        this.orientation.rotateMatrix(this.location, angle);
-    }
+  constructor(x: number, y: number, r: number, wall: boolean) {
+    const mass    = wall ? INF : r * r * 2;
+    const inertia = wall ? INF : r * r * r * 100;
 
-    applyForce(force: std.Vector, angForce: number) {
-        this.accel.add(std.divVector(force, this.mass));
-        this.angAccel += angForce / this.mass; 
-    }
-    
-    resetPos(v: std.Vector) {
-        this.location.add(v);
-        this.orientation.add(v);
-    }
+    this.basic = {
+      location:    vec(x, y),
+      velocity:    vec(0, 0),
+      angVelocity: 0,
+      accel:       vec(0, 0),
+      angAccel:    0,
+      mass,
+      inertia,
+      isGrounded:  false,
+    };
+    this.radius      = r;
+    this.orientation = vec(r + x, y);
+  }
 
-    update() {
-        this.velocity.add(this.accel);
-        this.velocity.limit(10);
-        this.accel.set(0,0);
-        this.angVelocity += this.angAccel;
-        this.angVelocity = utils.limitNum(this.angVelocity, 0.05);
-        this.angAccel = 0;
+  applyForce(force: Vector, angForce: number) {
+    this.basic.accel = v2add(this.basic.accel, force);
+    this.basic.angAccel += angForce;
+  }
 
-        this.location.add(this.velocity);
-        this.orientation.add(this.velocity);
-        this.rotate(this.angVelocity);
+  update() {
+    this.basic.velocity    = v2add(this.basic.velocity, this.basic.accel);
+    this.basic.angVelocity += this.basic.angAccel;
+
+    this.basic.velocity    = v2scale(this.basic.velocity, 0.9995);
+    this.basic.location    = v2add(this.basic.location, this.basic.velocity);
+    this.orientation       = v2add(this.orientation, this.basic.velocity);
+
+    this.basic.angVelocity *= 0.9995;
+    this.rotate(this.basic.angVelocity);
+
+    this.basic.accel    = vec(0, 0);
+    this.basic.angAccel = 0;
+  }
+
+  draw(color: string, thick: number) {
+    std.strokeColor(color);
+    std.strokeWidth(thick);
+    std.circle(this.basic.location.x, this.basic.location.y, this.radius, 0);
+    // Orientierungslinie
+    std.line(
+      this.basic.location.x, this.basic.location.y,
+      this.orientation.x,    this.orientation.y,
+    );
+    // Mittelpunkt
+    std.fillColor(color);
+    std.circle(this.basic.location.x, this.basic.location.y, 3, 1);
+  }
+
+  rotate(angle: number) {
+    const rel     = v2sub(this.orientation, this.basic.location);
+    const rotated = v2rot(rel, angle);
+    this.orientation = v2add(rotated, this.basic.location);
+  }
+
+  resetPos(delta: Vector) {
+    this.basic.location = v2add(this.basic.location, delta);
+    this.orientation    = v2add(this.orientation, delta);
+  }
+
+  applyGravity(gravity: Vector) {
+    if (this.basic.mass < INF) {
+      if (!this.basic.isGrounded) {
+        this.applyForce(gravity, 0);
+      } else {
+        const dampingForce    = v2scale(this.basic.velocity, -0.5);
+        const dampingAngForce = this.basic.angVelocity * -0.5;
+        this.applyForce(dampingForce, dampingAngForce);
+      }
     }
+  }
+
+  clearState() {
+    this.basic.isGrounded = false;
+  }
 }
 
-export class Wall extends Box{
+// ─── Interne Geometrie-Hilfsfunktionen ───────────────────────────────────────
 
-    constructor(x: number,y: number,w: number,h: number) {
-      super (x,y,w,h)
-      this.mass = Infinity;
-      this.inertia = Infinity;
-      this.typ = "Wall";
-    }
-  
-    display() {
-        std.push();
-        std.strokeColor(0);
-        super.display();
-        std.pop();
-    }
+function projectPolygon(vertices: Vector[], axis: Vector): [number, number] {
+  if (vertices.length === 0) return [0, 0];
+  let min = v2dot(vertices[0], axis);
+  let max = min;
+  for (let i = 1; i < vertices.length; i++) {
+    const proj = v2dot(vertices[i], axis);
+    if (proj < min) min = proj;
+    if (proj > max) max = proj;
+  }
+  return [min, max];
 }
 
-/**
- * @param a Box
- * @param b Box
- * @returns cp, normal
- */
-function detectCollisionBox(a: Shape, b:Shape): [std.Vector|null, std.Vector|null] {
-    // Geprüft wird, ob eine Ecke von boxA in die Kante von boxB schneidet
-    // Zusätzlich muss die Linie von Mittelpunkt boxA und Mittelpunkt boxB durch Kante von boxB gehen
-    // i ist Index von Ecke und j ist Index von Kante
-    // d = Diagonale von A.Mittelpunkt zu A.vertices(i)
-    // e = Kante von B(j) zu B(j+1)
-    // z = Linie von A.Mittelpunkt zu B.Mittelpunkt
-    // _perp = Perpendicularvektor
-    // scalar_d Faktor von d für den Schnittpunkt d/e
-    // scalar_z Faktor von z für den Schnittpunkt z/e
-    // mtv = minimal translation vector (überlappender Teil von d zur Kante e)
-
-    for (let i = 0; i < 4; i++) {            
-        for (let j = 0; j < 4; j++) {
-            // Prüfung auf intersection von Diagonale d zu Kante e
-            let [, scalar_d] = std.intersect(a.location, a.vertices[i], b.vertices[j], b.vertices[j + 1])
-            if (scalar_d) {
-                // Prüfung auf intersection Linie z zu Kante e
-                let [, scalar_z] = std.intersect(a.location, b.location, b.vertices[j], b.vertices[j + 1])
-                if (scalar_z) {
-                    // Collision findet statt
-                    // Objekte zurücksetzen und normal_e berechnen. Kollisionspunkz ist Ecke i von BoxA
-                    let e = std.subVector(b.vertices[j + 1], b.vertices[j]);
-                    let e_perp = new std.Vector(-(e.y), e.x);   
-                    let d = std.subVector(a.vertices[i], a.location);
-                    d.mult(1 - scalar_d);
-                    e_perp.normalize(); 
-                    let distance = std.dotProduct(e_perp, d);
-                    e_perp.mult(-distance); // mtv 
-                    a.resetPos(std.multVector(e_perp, 0.5));
-                    b.resetPos(std.multVector(e_perp, -0.5));
-                    e_perp.normalize(); // normal_e
-                    return [a.vertices[i], e_perp]
-                }
-            }
-        }
-    }
-    return [null, null];
+function getAxes(vertices: Vector[]): Vector[] {
+  const axes: Vector[] = [];
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const a    = vertices[i];
+    const b    = vertices[(i + 1) % n];
+    const edge = v2norm(v2sub(b, a));
+    axes.push(vec(-edge.y, edge.x));
+  }
+  return axes;
 }
 
-/**
- * @param boxA 
- * @param boxB 
- * @param cp Collisionpoint
- * @param normal Normalvector to edge e
- */
-function resolveCollisionBox(boxA: Shape, boxB: Shape, cp: std.Vector, normal: std.Vector) {
-    // rAP = Linie von A.location zu Kollisionspunkt (Ecke i von BoxA)
-    let rAP = std.subVector(cp, boxA.location);
-    // rBP = Linie von B.location zu Kollisionspunkt (ebenfalls Ecke i von BoxA)
-    let rBP = std.subVector(cp, boxB.location);
-    let rAP_perp = new std.Vector(-rAP.y, rAP.x);
-    let rBP_perp = new std.Vector(-rBP.y, rBP.x);
-    let VtanA = std.multVector(rAP_perp, boxA.angVelocity);
-    let VtanB = std.multVector(rBP_perp, boxB.angVelocity);
-    let VgesamtA = std.addVector(boxA.velocity, VtanA);
-    let VgesamtB = std.addVector(boxB.velocity, VtanB);
-    const velocity_AB = std.subVector(VgesamtA, VgesamtB);
-    if (std.dotProduct(velocity_AB, normal) < 0) { // wenn negativ, dann auf Kollisionskurs
-        let e = 0.7; //inelastischer Stoß
-        let j_denominator = std.dotProduct(std.multVector(velocity_AB, -(1+e)), normal);
-        let j_divLinear = std.dotProduct(normal, std.multVector(normal, (1/boxA.mass + 1/boxB.mass)));
-        let j_divAngular = Math.pow(std.dotProduct(rAP_perp, normal), 2) / boxA.inertia + Math.pow(std.dotProduct(rBP_perp, normal), 2) / boxB.inertia;
-        let j = j_denominator / (j_divLinear + j_divAngular);
-        // Grundlage für Friction berechnen (t)
-        let t = new std.Vector(-(normal.y), normal.x);
-        let t_scalarprodukt = std.dotProduct(velocity_AB, t);
-        t.mult(t_scalarprodukt);
-        t.normalize();
-        
-        //apply Force to acceleration
-        boxA.accel.add(std.addVector(std.multVector(normal, (j/boxA.mass)), std.multVector(t, (0.2*-j/boxA.mass))));
-        boxB.accel.add(std.addVector(std.multVector(normal, (-j/boxB.mass)), std.multVector(t, (0.2*j/boxB.mass))));
-        boxA.angAccel += std.dotProduct(rAP_perp, std.addVector(std.multVector(normal, j/boxA.inertia), std.multVector(t, 0.2*-j/boxA.inertia)));
-        boxB.angAccel += std.dotProduct(rBP_perp, std.addVector(std.multVector(normal, -j/boxB.inertia), std.multVector(t, 0.2*j/boxB.inertia)));
-    }
-
+function pointInPolygon(point: Vector, vertices: Vector[]): boolean {
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const a       = vertices[i];
+    const b       = vertices[(i + 1) % n];
+    const edge    = v2sub(b, a);
+    const toPoint = v2sub(point, a);
+    if (v2dot(edge, toPoint) < 0) return false;
+  }
+  return true;
 }
 
-/**
- * @param a Ball
- * @param b Ball
- * @returns normal
- */
-function detectCollisionBall(a: Shape, b: Shape): std.Vector|null {
-    //Distanz ermitteln
-    let radiusTotal = a.radius + b.radius;
-    let distance = a.location.dist(b.location);
-    if (distance < radiusTotal) {
-        //Treffer
-        let space = (radiusTotal - distance);
-        let collisionLine = std.subVector(a.location, b.location);
-        collisionLine.setMag(space);
-        a.resetPos(std.multVector(collisionLine, 0.5));
-        b.resetPos(std.multVector(collisionLine, -0.5));
-        collisionLine.normalize();
-        return collisionLine;
-    }
-    return null;
+function findContactPoints(verticesA: Vector[], verticesB: Vector[]): Vector[] {
+  const contacts: Vector[] = [];
+  for (const p of verticesA) {
+    if (pointInPolygon(p, verticesB)) contacts.push(p);
+  }
+  for (const p of verticesB) {
+    if (pointInPolygon(p, verticesA)) contacts.push(p);
+  }
+  return contacts;
 }
 
-/**
- * @param a Ball
- * @param b Ball
- * @param normal 
- */
-function resolveCollisionBall(a: Shape, b: Shape, normal: std.Vector) {
-    const rA = std.multVector(normal, -a.radius);
-    const rA_perp = new std.Vector(-rA.y, rA.x);
-    const rB = std.multVector(normal, b.radius);
-    const rB_perp = new std.Vector(-rB.y, rB.x);
-    const VtanA = std.multVector(rA_perp, a.angVelocity);
-    const VtanB = std.multVector(rB_perp, b.angVelocity);
-    const VgesamtA = std.addVector(a.velocity, VtanA);
-    const VgesamtB = std.addVector(b.velocity, VtanB);
-    const velocity_AB = std.subVector(VgesamtA, VgesamtB);
-
-    if (std.dotProduct(velocity_AB, normal) < 0) { // wenn negativ, dann auf Kollisionskurs
-        const e = 0.7; //inelastischer Stoß
-        const j_denominator = std.dotProduct(std.multVector(velocity_AB, -(1+e)), normal);
-        const j_divLinear = std.dotProduct(normal, std.multVector(normal, (1/a.mass + 1/b.mass)));
-        const j = j_denominator / j_divLinear;
-        // Grundlage für Friction berechnen
-        const t = new std.Vector(-(normal.y), normal.x);
-        const t_scalarprodukt = std.dotProduct(velocity_AB, t);
-        t.mult(t_scalarprodukt);
-        t.normalize();
-        //apply Force
-        a.accel.add(std.addVector(std.multVector(normal, (0.8*j/a.mass)), std.multVector(t, (0.2*-j/a.mass))));
-        b.accel.add(std.addVector(std.multVector(normal, (0.8*-j/b.mass)), std.multVector(t, (0.2*j/b.mass))))
-        a.angAccel += std.dotProduct(rA_perp, std.multVector(t, 0.1*-j/a.inertia));
-        b.angAccel += std.dotProduct(rB_perp, std.multVector(t, 0.1*j/b.inertia));
-    }
+function findReferenceEdge(vertices: Vector[], normal: Vector): [Vector, Vector] {
+  let bestDot = -INF;
+  let p1 = vec(0, 0);
+  let p2 = vec(0, 0);
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const a         = vertices[i];
+    const b         = vertices[(i + 1) % n];
+    const edge      = v2norm(v2sub(b, a));
+    const edgeNormal = vec(-edge.y, edge.x);
+    const d         = v2dot(edgeNormal, normal);
+    if (d > bestDot) { bestDot = d; p1 = a; p2 = b; }
+  }
+  return [p1, p2];
 }
 
-/**
- * @param ball 
- * @param box 
- * @returns cp, normal
- */
-function detectCollisionBallBox(ball: Shape, box: Shape): [std.Vector|null, std.Vector|null] {
-    for (let j = 0; j < 4; j++) {
-        let e = std.subVector(box.vertices[j+1], box.vertices[j]);
-        //Vektor von Ecke der Box zum Ball
-        let VerticeToBall = std.subVector(ball.location, box.vertices[j]);
-        // --------- Einfügung 09.04.2021, um Kollision mit Ecken abzufangen
-        if (VerticeToBall.mag() < ball.radius) {
-            return [box.vertices[j], VerticeToBall];
-        }
-        // --------- Ende Einfügung 09.04.2021
-        let mag_e = e.mag();
-        e.normalize();
-        //Scalarprojektion von Vektor VerticeToBall auf Kante e
-        let scalar_e = std.dotProduct(VerticeToBall, e);
-        if (scalar_e > 0 && scalar_e <= mag_e) {
-            //Senkrechte von Ball trifft auf Kante e der Box
-            //e2 = Kante e mit der Länge von scalar_e
-            let e2 = std.multVector(e, scalar_e);
-            //Senkrechte von e zum Ball = VerticeToBall - e2
-            let e_perp = std.subVector(VerticeToBall, e2);
-
-            if (e_perp.mag() < ball.radius) {
-                //Ball berührt Box
-                //Abstand wieder herstellen mit mtv (minimal translation vector)
-                let mtv = e_perp.copy();
-                let p = std.addVector(box.vertices[j], e2);
-                mtv.setMag(ball.radius - e_perp.mag());
-                //e_perp und damit mtv zeigt von Kante zu Ball
-                ball.resetPos(mtv);
-                //vor Berechnung muss e_perp normalisiert werden
-                e_perp.normalize();
-                //resolveCollisionBallBox(ball, box, p, e_perp)
-                return [p, e_perp]
-            }
-        }
-    }
-    return [null, null];
+function projectPointOntoEdge(p: Vector, a: Vector, b: Vector): Vector {
+  const ab = v2sub(b, a);
+  let t    = v2dot(v2sub(p, a), ab) / v2dot(ab, ab);
+  t        = Math.min(1, Math.max(0, t));
+  return v2add(a, v2scale(ab, t));
 }
 
-/**
- * @param {Shape} ball 
- * @param {Shape} box 
- * @param {std.Vector} cp Collision Point
- * @param {std.Vector} normal Normal Vector
- */
-function resolveCollisionBallBox(ball: Shape, box: Shape, cp: std.Vector, normal: std.Vector) {
-    const rA = std.multVector(normal, -ball.radius);
-    const rA_perp = new std.Vector(-rA.y, rA.x);
-    const rBP = std.subVector(cp, box.location);
-    const rBP_perp = new std.Vector(-rBP.y, rBP.x);
-    const VtanA = std.multVector(rA_perp, ball.angVelocity);
-    const VgesamtA = std.addVector(ball.velocity, VtanA);
-    const VtanB = std.multVector(rBP_perp, box.angVelocity);
-    const VgesamtB = std.addVector(box.velocity, VtanB);
-    const velocity_AB = std.subVector(VgesamtA, VgesamtB);
-
-    if (std.dotProduct(velocity_AB, normal) < 0) { // wenn negativ, dann auf Kollisionskurs
-
-        const e = 0.7; //inelastischer Stoß
-        const j_denominator = std.dotProduct(std.multVector(velocity_AB, -(1+e)), normal);
-        const j_divLinear = std.dotProduct(normal, std.multVector(normal, (1/ball.mass + 1/box.mass)));
-        const j_divAngular = Math.pow(std.dotProduct(rBP_perp, normal), 2) / box.inertia; //nur für Box zu rechnen
-        const j = j_denominator / (j_divLinear + j_divAngular);
-        // Grundlage für Friction berechnen
-        const t = new std.Vector(-(normal.y), normal.x);
-        const t_scalarprodukt = std.dotProduct(velocity_AB, t);
-        t.mult(t_scalarprodukt);
-        t.normalize();
-
-        ball.accel.add(std.addVector(std.multVector(normal, (0.8*j/ball.mass)), std.multVector(t, (0.05*-j/ball.mass))));
-        box.accel.add(std.addVector(std.multVector(normal, (-j/box.mass)), std.multVector(t, (0.05*j/box.mass))));
-        ball.angAccel += std.dotProduct(rA_perp, std.multVector(t, 0.05*-j/ball.inertia));
-        box.angAccel += std.dotProduct(rBP_perp, std.addVector(std.multVector(normal, -j/box.inertia), std.multVector(t, 0.05*j/box.inertia)));
-    }
+function transferContactsToA(contacts: Vector[], verticesA: Vector[], normal: Vector): Vector[] {
+  const [refStart, refEnd] = findReferenceEdge(verticesA, normal);
+  return contacts.map(c => projectPointOntoEdge(c, refStart, refEnd));
 }
 
-export function checkCollision(shapes: Shape[]) {
-    for (let i = 0; i < shapes.length; i++) {    
-        for (let j = i+1; j < shapes.length; j++ ) {
-            //Shadow berechnen von Element i und Element j 
-            let shadow_i = createShadow(shapes[i]);
-            let shadow_j = createShadow(shapes[j]);
-            //Überschneidung prüfen
-            if (shadow_i.maxX >= shadow_j.minX && shadow_i.minX <= shadow_j.maxX && shadow_i.maxY >= shadow_j.minY && shadow_i.minY <= shadow_j.maxY) {  
-                //dann Überschneidung
-                // Testcode
-                //lb2d.line(shapes[i].location.x, shapes[i].location.y, shapes[j].location.x, shapes[j].location.y)
-                // Ende Testcode
-    
-                if (shapes[i].typ == "Ball") {
-                    if (shapes[j].typ == "Ball") {
-                        let normal = detectCollisionBall(shapes[i], shapes[j]);
-                        if (normal) {
-                            resolveCollisionBall(shapes[i], shapes[j], normal);
-                        }
-                    } else {
-                        let [cp, normal] = detectCollisionBallBox(shapes[i],shapes[j]);
-                        if (cp && normal) {
-                            resolveCollisionBallBox(shapes[i],shapes[j], cp, normal);
-                        }
-                    }
-                }
-            
-                if (shapes[i].typ == "Box") {
-                    if (shapes[j].typ == "Box") {
-                        // beide Boxen müssen geprüft werden, ob sie auf
-                        // die jeweils andere trefen könnte
-                        let [cp, normal] = detectCollisionBox(shapes[i], shapes[j]);
-                        if (cp && normal) {
-                            resolveCollisionBox(shapes[i], shapes[j], cp, normal);  
-                        } else {
-                            let [cp, normal] = detectCollisionBox(shapes[j], shapes[i]);    
-                            if (cp && normal) {
-                                resolveCollisionBox(shapes[j], shapes[i], cp, normal);
-                            }
-                        }
-                    } else {
-                        let [cp, normal] = detectCollisionBallBox(shapes[j], shapes[i]);
-                        if (cp && normal) {
-                            resolveCollisionBallBox(shapes[j], shapes[i], cp, normal);
-                        }
-                    }            
-                }
-            }
+// ─── Massen-basierte Positions-Resets ────────────────────────────────────────
 
-        }
-    }
+function resetPolyPositionsBasedOnMass(polyA: Polygon, polyB: Polygon, mtv: Vector) {
+  if (polyA.basic.mass < INF) {
+    polyA.resetPos(v2scale(mtv, -0.5));
+  } else {
+    polyB.resetPos(v2scale(mtv, 0.5));
+  }
+  if (polyB.basic.mass < INF) {
+    polyB.resetPos(v2scale(mtv, 0.5));
+  } else {
+    polyA.resetPos(v2scale(mtv, -0.5));
+  }
 }
 
-export function checkWalls(shapes: Shape[], walls: Shape[]) {
-    for (let i = 0; i < shapes.length; i++) {    
-        for (let j = 0; j < walls.length; j++ ) {
-            //Shadow berechnen von Element i und Element j 
-            let shadow_i = createShadow(shapes[i]);
-            let shadow_j = createShadow(walls[j]);
-            //Überschneidung prüfen
-            if (shadow_i.maxX >= shadow_j.minX && shadow_i.minX <= shadow_j.maxX && shadow_i.maxY >= shadow_j.minY && shadow_i.minY <= shadow_j.maxY) {  
-                //dann Überschneidung
-                // Testcode
-                //lb2d.line(shapes[i].location.x, shapes[i].location.y, shapes[j].location.x, shapes[j].location.y)
-                // Ende Testcode
-    
-                if (shapes[i].typ == "Ball") {
-                    let [cp, normal] = detectCollisionBallBox(shapes[i],walls[j]);
-                    if (cp && normal) {
-                        resolveCollisionBallBox(shapes[i],walls[j], cp, normal);
-                    }
-                }
-            
-                if (shapes[i].typ == "Box") {
-                    let [cp, normal] = detectCollisionBox(shapes[i], walls[j]);
-                    if (cp && normal) {
-                        resolveCollisionBox(shapes[i], walls[j], cp, normal);  
-                    } else {
-                        let [cp, normal] = detectCollisionBox(walls[j], shapes[i]);   
-                        if (cp &&  normal) {
-                            resolveCollisionBox(shapes[i], walls[j], cp, normal); 
-                        }     
-                    }          
-                }
-            }
-        }
-    }
+function resetCirclePolyPositionsBasedOnMass(poly: Polygon, circle: Circle, mtv: Vector) {
+  if (poly.basic.mass < INF) {
+    poly.resetPos(v2scale(mtv, -0.5));
+  } else {
+    circle.resetPos(v2scale(mtv, 0.5));
+  }
+  if (circle.basic.mass < INF) {
+    circle.resetPos(v2scale(mtv, 0.5));
+  } else {
+    poly.resetPos(v2scale(mtv, -0.5));
+  }
 }
 
-/** 
- * @returns KickingFunction
-*/
-export function createKicking(): (shapes: Shape[]) => void {
-    let index:number|null = null;
-    let base = new std.Vector(0, 0);
-    
-    return function(shapes) {
-        if (std.isMouseDown() && index == null) {
-            shapes.forEach((shape, idx) => {
-                if (shape.location.dist(new std.Vector(std.mouseX, std.mouseY)) < 15) {
-                  base.set(shape.location.x, shape.location.y);
-                  index = idx;
-                }
-            })  
-            return;  
-        }
-    
-        if (std.isMouseDown() && index != null) {
-            std.drawArrow(base, new std.Vector(std.mouseX, std.mouseY), 100);
-            return;
-        }  
-    
-        if (std.isMouseUp() && index != null) {
-            let mouse = new std.Vector(std.mouseX, std.mouseY);
-            let force = std.subVector(mouse, shapes[index].location);
-            force.mult(3);
-            shapes[index].applyForce(force, 0);
-            index = null;
-            return;
-        }      
-    }
+function resetCirclePositionsBasedOnMass(cA: Circle, cB: Circle, mtv: Vector) {
+  if (cA.basic.mass < INF) {
+    cA.resetPos(v2scale(mtv, -0.5));
+  } else {
+    cB.resetPos(v2scale(mtv, 0.5));
+  }
+  if (cB.basic.mass < INF) {
+    cB.resetPos(v2scale(mtv, 0.5));
+  } else {
+    cA.resetPos(v2scale(mtv, -0.5));
+  }
 }
 
-function createShadow(shape:Shape) {
-    let shadow: {minX:number, maxX:number, minY:number, maxY:number};
-    if (shape.typ == "Ball") {
-        shadow = {minX:shape.location.x - shape.radius, maxX:shape.location.x + shape.radius, minY:shape.location.y - shape.radius, maxY:shape.location.y + shape.radius}
+// ─── Relative Vektoren (für Impulsberechnung) ────────────────────────────────
+
+type RelVectors = { rAP_perp: Vector; rBP_perp: Vector; vGesamtA: Vector; velocity_AB: Vector };
+
+function calcPolyRelVectors(polyA: Polygon, polyB: Polygon, cp: Vector): RelVectors {
+  const rAP      = v2sub(cp, polyA.basic.location);
+  const rBP      = v2sub(cp, polyB.basic.location);
+  const rAP_perp = vec(-rAP.y, rAP.x);
+  const rBP_perp = vec(-rBP.y, rBP.x);
+  const VtanA    = v2scale(rAP_perp, polyA.basic.angVelocity);
+  const VtanB    = v2scale(rBP_perp, polyB.basic.angVelocity);
+  const vGesamtA = v2add(polyA.basic.velocity, VtanA);
+  const vGesamtB = v2add(polyB.basic.velocity, VtanB);
+  return { rAP_perp, rBP_perp, vGesamtA, velocity_AB: v2sub(vGesamtA, vGesamtB) };
+}
+
+function calcCirclePolyRelVectors(poly: Polygon, circle: Circle, cp: Vector): RelVectors {
+  const rAP      = v2sub(cp, poly.basic.location);
+  const rBP      = v2sub(cp, circle.basic.location);
+  const rAP_perp = vec(-rAP.y, rAP.x);
+  const rBP_perp = vec(-rBP.y, rBP.x);
+  const VtanA    = v2scale(rAP_perp, poly.basic.angVelocity);
+  const VtanB    = v2scale(rBP_perp, circle.basic.angVelocity);
+  const vGesamtA = v2add(poly.basic.velocity, VtanA);
+  const vGesamtB = v2add(circle.basic.velocity, VtanB);
+  return { rAP_perp, rBP_perp, vGesamtA, velocity_AB: v2sub(vGesamtA, vGesamtB) };
+}
+
+function calcCircleRelVectors(cA: Circle, cB: Circle, mtv: Vector): RelVectors {
+  const nMtv     = v2norm(mtv);
+  const rA       = v2scale(nMtv, -cA.radius);
+  const rB       = v2scale(nMtv,  cB.radius);
+  const rAP_perp = vec(-rA.y, rA.x);
+  const rBP_perp = vec(-rB.y, rB.x);
+  const VtanA    = v2scale(rAP_perp, cA.basic.angVelocity);
+  const VtanB    = v2scale(rBP_perp, cB.basic.angVelocity);
+  const vGesamtA = v2add(cA.basic.velocity, VtanA);
+  const vGesamtB = v2add(cB.basic.velocity, VtanB);
+  return { rAP_perp, rBP_perp, vGesamtA, velocity_AB: v2sub(vGesamtA, vGesamtB) };
+}
+
+// ─── Grounded-Checks ─────────────────────────────────────────────────────────
+
+function isHorizontal(mtv: Vector, gravity: Vector): boolean {
+  const result = v2dot(mtv, gravity) / (v2len(mtv) * v2len(gravity));
+  return result > 0.9 || result < -0.9;
+}
+
+function isCircleGrounded(angVel: number, velocity_AB: Vector, mtv: Vector): boolean {
+  if (v2len(velocity_AB) > 0.5)       return false;
+  if (Math.abs(angVel) > 0.1)         return false;
+  const gravity = vec(0, 1);
+  const dot     = v2dot(mtv, gravity);
+  const lenM    = v2len(mtv);
+  const lenG    = v2len(gravity);
+  if (lenM === 0 || lenG === 0)        return false;
+  return dot / (lenM * lenG) < -0.9;
+}
+
+function isPolyGrounded(contacts: Vector[], vGesamtA: Vector, velocity_AB: Vector, mtv: Vector): boolean {
+  return contacts.length > 1 &&
+    v2len(velocity_AB) < 1.5 &&
+    v2len(vGesamtA) < 1.5 &&
+    isHorizontal(mtv, vec(0, 1));
+}
+
+function findPolyTop(polyA: Polygon, polyB: Polygon, mtv: Vector): Polygon {
+  return v2dot(mtv, vec(0, 1)) > 0 ? polyA : polyB;
+}
+
+function isCenterOfMassSupported(location: Vector, contacts: Vector[], normal: Vector): boolean {
+  if (contacts.length < 2) return false;
+  const tangent  = vec(-normal.y, normal.x);
+  const comProj  = v2dot(location, tangent);
+  let minP =  INF;
+  let maxP = -INF;
+  for (const cp of contacts) {
+    const proj = v2dot(cp, tangent);
+    if (proj < minP) minP = proj;
+    if (proj > maxP) maxP = proj;
+  }
+  const epsilon = 0.5;
+  return comProj >= minP - epsilon && comProj <= maxP + epsilon;
+}
+
+// ─── Impuls- und Kraftberechnungen ───────────────────────────────────────────
+
+function calcFrictionVector(mtv: Vector, velocity_AB: Vector): Vector {
+  const t  = vec(-mtv.y, mtv.x);
+  const sp = v2dot(velocity_AB, t);
+  return v2norm(v2scale(t, sp));
+}
+
+function calcPolyImpulse(
+  polyA: Polygon, polyB: Polygon,
+  mtv: Vector, rAP_perp: Vector, rBP_perp: Vector, velocity_AB: Vector,
+  e: number,
+): number {
+  const jNum   = v2dot(v2scale(velocity_AB, -(1 + e)), mtv);
+  const jLinear = v2dot(mtv, v2scale(mtv, 1 / polyA.basic.mass + 1 / polyB.basic.mass));
+  const jAng    = Math.pow(v2dot(rAP_perp, mtv), 2) / polyA.basic.inertia +
+                  Math.pow(v2dot(rBP_perp, mtv), 2) / polyB.basic.inertia;
+  return jNum / (jLinear + jAng);
+}
+
+function calcCirclePolyImpulse(
+  poly: Polygon, circle: Circle,
+  mtv: Vector, rAP_perp: Vector, velocity_AB: Vector,
+  e: number,
+): number {
+  const jNum    = v2dot(v2scale(velocity_AB, -(1 + e)), mtv);
+  const jLinear = v2dot(mtv, v2scale(mtv, 1 / poly.basic.mass + 1 / circle.basic.mass));
+  const jAng    = Math.pow(v2dot(rAP_perp, mtv), 2) / poly.basic.inertia;
+  return jNum / (jLinear + jAng);
+}
+
+function calcCircleImpulse(
+  cA: Circle, cB: Circle,
+  mtv: Vector, velocity_AB: Vector,
+  e: number,
+): number {
+  const jNum    = v2dot(v2scale(velocity_AB, -(1 + e)), mtv);
+  const jLinear = v2dot(mtv, v2scale(mtv, 1 / cA.basic.mass + 1 / cB.basic.mass));
+  return jNum / jLinear;
+}
+
+type Forces = { forceA: Vector; angForceA: number; forceB: Vector; angForceB: number };
+
+function calcPolyCollisionForces(
+  polyA: Polygon, polyB: Polygon,
+  mtv: Vector, rAP_perp: Vector, rBP_perp: Vector, velocity_AB: Vector,
+): Forces {
+  const e = 0.4;
+  const t = calcFrictionVector(mtv, velocity_AB);
+  const f = -0.15;
+  const j = calcPolyImpulse(polyA, polyB, mtv, rAP_perp, rBP_perp, velocity_AB, e);
+
+  const forceA    = v2add(v2scale(mtv, j / polyA.basic.mass), v2scale(t, f * -j / polyA.basic.mass));
+  const angForceA = v2dot(rAP_perp, v2add(v2scale(mtv, j / polyA.basic.inertia), v2scale(t, f * -j / polyA.basic.inertia)));
+  const forceB    = v2add(v2scale(mtv, -j / polyB.basic.mass), v2scale(t, f * j / polyB.basic.mass));
+  const angForceB = v2dot(rBP_perp, v2add(v2scale(mtv, -j / polyB.basic.inertia), v2scale(t, f * j / polyB.basic.inertia)));
+  return { forceA, angForceA, forceB, angForceB };
+}
+
+function calcCirclePolyCollisionForces(
+  poly: Polygon, circle: Circle,
+  mtv: Vector, rAP_perp: Vector, rBP_perp: Vector, velocity_AB: Vector,
+): Forces {
+  const e = 0.3;
+  const t = calcFrictionVector(mtv, velocity_AB);
+  const f = -0.15;
+  const j = calcCirclePolyImpulse(poly, circle, mtv, rAP_perp, velocity_AB, e);
+
+  const forceA    = v2add(v2scale(mtv, j / poly.basic.mass), v2scale(t, f * -j / poly.basic.mass));
+  const angForceA = v2dot(rAP_perp, v2add(v2scale(mtv, j / poly.basic.inertia), v2scale(t, f * -j / poly.basic.inertia)));
+  const forceB    = v2add(v2scale(mtv, -j / circle.basic.mass), v2scale(t, f * j / circle.basic.mass));
+  const angForceB = v2dot(rBP_perp, v2scale(t, f * j / circle.basic.inertia));
+  return { forceA, angForceA, forceB, angForceB };
+}
+
+function calcCircleCollisionForces(
+  cA: Circle, cB: Circle,
+  mtv: Vector, rAP_perp: Vector, rBP_perp: Vector, velocity_AB: Vector,
+): Forces {
+  const e = 0.3;
+  const t = calcFrictionVector(mtv, velocity_AB);
+  const f = -0.15;
+  const j = calcCircleImpulse(cA, cB, mtv, velocity_AB, e);
+
+  const forceA    = v2add(v2scale(mtv, j / cA.basic.mass), v2scale(t, f * j / cA.basic.mass));
+  const angForceA = v2dot(rAP_perp, v2scale(t, f * j / cA.basic.inertia));
+  const forceB    = v2add(v2scale(mtv, -j / cB.basic.mass), v2scale(t, f * -j / cB.basic.mass));
+  const angForceB = v2dot(rBP_perp, v2scale(t, f * -j / cB.basic.inertia));
+  return { forceA, angForceA, forceB, angForceB };
+}
+
+// ─── Kollisionserkennung ─────────────────────────────────────────────────────
+
+type CollResult = { isColliding: boolean; mtv: Vector; contacts: Vector[] };
+const NO_COLL: CollResult = { isColliding: false, mtv: vec(0, 0), contacts: [] };
+
+export function detectCollisionPoly(polyA: Polygon, polyB: Polygon): CollResult {
+  let smallestOverlap = INF;
+  let smallestAxis    = vec(0, 0);
+
+  const axes = [...getAxes(polyA.vertices), ...getAxes(polyB.vertices)];
+  for (const axis of axes) {
+    const [minA, maxA] = projectPolygon(polyA.vertices, axis);
+    const [minB, maxB] = projectPolygon(polyB.vertices, axis);
+    const overlap      = Math.min(maxA, maxB) - Math.max(minA, minB);
+    if (overlap <= 0) return NO_COLL;
+
+    if (overlap < smallestOverlap) {
+      smallestOverlap = overlap;
+      smallestAxis    = axis;
+      const dir = v2sub(polyB.basic.location, polyA.basic.location);
+      if (v2dot(dir, smallestAxis) < 0) smallestAxis = v2scale(smallestAxis, -1);
+    }
+  }
+
+  const mtv         = v2scale(smallestAxis, smallestOverlap);
+  const rawContacts = findContactPoints(polyA.vertices, polyB.vertices);
+  const contacts    = transferContactsToA(rawContacts, polyA.vertices, v2scale(smallestAxis, -1));
+  if (contacts.length > 0) return { isColliding: true, mtv, contacts };
+  return NO_COLL;
+}
+
+export function detectCollisionCirclePoly(poly: Polygon, circle: Circle): CollResult {
+  const n = poly.vertices.length;
+  let closestDistSq = INF;
+  let closestPoint  = vec(0, 0);
+  let inside        = true;
+
+  for (let i = 0; i < n; i++) {
+    const a        = poly.vertices[i];
+    const b        = poly.vertices[(i + 1) % n];
+    const edge     = v2sub(b, a);
+    const toCircle = v2sub(circle.basic.location, a);
+    const normal   = vec(-edge.y, edge.x);
+
+    if (v2dot(normal, toCircle) < 0) inside = false;
+
+    const edgeLenSq = v2dot(edge, edge);
+    const t         = v2dot(toCircle, edge) / edgeLenSq;
+    const clamped   = Math.min(1, Math.max(0, t));
+    const current   = v2add(a, v2scale(edge, clamped));
+    const diff      = v2sub(circle.basic.location, current);
+    const distSq    = v2dot(diff, diff);
+
+    if (distSq < closestDistSq) { closestDistSq = distSq; closestPoint = current; }
+  }
+
+  if (inside || closestDistSq <= circle.radius * circle.radius) {
+    let axis: Vector;
+    let overlap: number;
+
+    if (inside) {
+      let minOverlap = INF;
+      axis = vec(0, -1);
+      for (let i = 0; i < n; i++) {
+        const a        = poly.vertices[i];
+        const b        = poly.vertices[(i + 1) % n];
+        const edge     = v2sub(b, a);
+        const normal   = v2norm(vec(-edge.y, edge.x));
+        const toCircle = v2sub(circle.basic.location, a);
+        const dist     = v2dot(normal, toCircle);
+        const ov       = dist + circle.radius;
+        if (ov < minOverlap) { minOverlap = ov; axis = v2scale(normal, -1); }
+      }
+      overlap = minOverlap;
     } else {
-        shadow = {minX:Infinity, maxX:-Infinity, minY:Infinity, maxY:-Infinity}
-        for (let i = 0; i < 4; i++) {
-            if (shape.vertices[i].x < shadow.minX) {
-                shadow.minX = shape.vertices[i].x;
-            } 
-            if (shape.vertices[i].y < shadow.minY) {
-                shadow.minY = shape.vertices[i].y;
-            } 
-            if (shape.vertices[i].x > shadow.maxX) {
-                shadow.maxX = shape.vertices[i].x;
-            } 
-            if (shape.vertices[i].y > shadow.maxY) {
-                shadow.maxY = shape.vertices[i].y;
-            } 
-        }    
+      const dist = Math.sqrt(closestDistSq);
+      overlap    = circle.radius - dist;
+      if (dist > 1e-6) {
+        axis = v2scale(v2sub(circle.basic.location, closestPoint), 1 / dist);
+      } else {
+        axis = vec(0, -1);
+      }
     }
-    return shadow;
+
+    const mtv = v2scale(axis, overlap);
+    return { isColliding: true, mtv, contacts: [closestPoint] };
+  }
+
+  return NO_COLL;
 }
 
- export function applyFriction(shapes: Shape[]) {
-    shapes.forEach(shape => {
-        let frictForce = shape.velocity.copy();
-        frictForce.normalize();
-        frictForce.mult(COEFFICIENT * -1); // in Gegenrichtung
-        frictForce.limit(shape.velocity.mag());
-
-        let frictAngDirection = shape.angVelocity < 0 ? 1 : -1; // in Gegenrichtung
-        let frictAngForce = utils.limitNum(COEFFICIENT * 0.05 * frictAngDirection, Math.abs(shape.angVelocity));
-
-        shape.applyForce(frictForce, frictAngForce);
-    });
+export function detectCollisionCircle(cA: Circle, cB: Circle): CollResult {
+  const line       = v2sub(cA.basic.location, cB.basic.location);
+  const dist       = v2len(line);
+  const radiusSum  = cA.radius + cB.radius;
+  if (dist < radiusSum) {
+    const overlap = dist - radiusSum;
+    const mtv     = v2scale(v2norm(line), overlap);
+    return { isColliding: true, mtv, contacts: [] };
+  }
+  return NO_COLL;
 }
 
-export function applyGravity(shapes: Shape[]) {
-    shapes.forEach(shape => {
-        if (shape.mass != Infinity) {
-            shape.applyForce(std.multVector(GRAVITY, shape.mass), 0);
-        }
-    });
+// ─── Kollisionsauflösung ──────────────────────────────────────────────────────
+
+export function resolveCollisionPoly(
+  polyA: Polygon, polyB: Polygon,
+  contacts: Vector[], mtv: Vector,
+): Forces {
+  const slop      = 0.5;
+  const mtvLength = v2len(mtv);
+
+  if (mtvLength > slop) {
+    const mtvCorr = v2scale(v2norm(mtv), mtvLength - slop);
+    resetPolyPositionsBasedOnMass(polyA, polyB, mtvCorr);
+  }
+
+  const mtvN = v2norm(mtv);
+
+  const centerCP = contacts.length > 1
+    ? v2scale(v2add(contacts[0], contacts[1]), 0.5)
+    : contacts[0];
+
+  const { vGesamtA: vGA, velocity_AB: vAB } = calcPolyRelVectors(polyA, polyB, centerCP);
+
+  const polyTop = findPolyTop(polyA, polyB, mtvN);
+  if (isPolyGrounded(contacts, vGA, vAB, mtvN)) {
+    polyTop.basic.isGrounded = isCenterOfMassSupported(polyTop.basic.location, contacts, mtvN);
+  } else {
+    polyTop.basic.isGrounded = false;
+  }
+
+  let sumForceA    = vec(0, 0);
+  let sumForceB    = vec(0, 0);
+  let sumAngForceA = 0;
+  let sumAngForceB = 0;
+  let applied      = 0;
+
+  for (const cp of contacts) {
+    const { rAP_perp, rBP_perp, velocity_AB } = calcPolyRelVectors(polyA, polyB, cp);
+    if (v2dot(velocity_AB, v2scale(mtvN, -1)) < 0) {
+      const f = calcPolyCollisionForces(polyA, polyB, mtvN, rAP_perp, rBP_perp, velocity_AB);
+      sumForceA    = v2add(sumForceA, f.forceA);
+      sumAngForceA += f.angForceA;
+      sumForceB    = v2add(sumForceB, f.forceB);
+      sumAngForceB += f.angForceB;
+      applied++;
+    }
+  }
+
+  if (applied > 0) {
+    return {
+      forceA:    v2scale(sumForceA, 1 / applied),
+      angForceA: sumAngForceA / applied,
+      forceB:    v2scale(sumForceB, 1 / applied),
+      angForceB: sumAngForceB / applied,
+    };
+  }
+  return { forceA: vec(0, 0), angForceA: 0, forceB: vec(0, 0), angForceB: 0 };
 }
 
-export function applyDragforce(shapes: Shape[]) {
-    shapes.forEach((shape) => {
-        // Magnitude is coefficient * speed squared
-        let speedSq = shape.velocity.magSq();
-        let dragMagnitude = 0.3 * speedSq;
+export function resolveCollisionCirclePoly(
+  poly: Polygon, circle: Circle,
+  contacts: Vector[], mtv: Vector,
+): Forces {
+  const slop      = 0.5;
+  const mtvLength = v2len(mtv);
 
-        // Direction is inverse of velocity
-        let dragForce = shape.velocity.copy();
-        dragForce.mult(-1);
+  if (mtvLength > slop) {
+    const mtvCorr = v2scale(v2norm(mtv), mtvLength - slop);
+    resetCirclePolyPositionsBasedOnMass(poly, circle, mtvCorr);
+  }
 
-        let dragAngDirection = shape.angVelocity < 0 ? 1 : -1; // in Gegenrichtung
-        let dragAngForce = utils.limitNum(0.001 * speedSq * dragAngDirection, Math.abs(shape.angVelocity))
+  const mtvN = v2norm(mtv);
+  const cp   = contacts[0];
+  const { rAP_perp, rBP_perp, velocity_AB } = calcCirclePolyRelVectors(poly, circle, cp);
 
-        // Scale according to magnitude
-        // dragForce.setMag(dragMagnitude);
-        dragForce.normalize();
-        dragForce.mult(dragMagnitude);
-        shape.applyForce(dragForce, dragAngForce);
-    })
-    
+  circle.basic.isGrounded = isCircleGrounded(
+    circle.basic.angVelocity,
+    v2scale(velocity_AB, -1),
+    v2scale(mtvN, -1),
+  );
+
+  if (v2dot(velocity_AB, v2scale(mtvN, -1)) < 0) {
+    return calcCirclePolyCollisionForces(poly, circle, mtvN, rAP_perp, rBP_perp, velocity_AB);
+  }
+  return { forceA: vec(0, 0), angForceA: 0, forceB: vec(0, 0), angForceB: 0 };
 }
 
-export function update(shapes:Shape[]) {
-    shapes.forEach(element => {
-        if (element.typ != "Wall") {
-            element.update();
-        }
-        element.display();
-    });
+export function resolveCollisionCircle(
+  cA: Circle, cB: Circle,
+  mtv: Vector,
+): Forces {
+  const slop      = 0.5;
+  const mtvLength = v2len(mtv);
+
+  if (mtvLength > slop) {
+    const mtvCorr = v2scale(v2norm(mtv), mtvLength - slop);
+    resetCirclePositionsBasedOnMass(cA, cB, mtvCorr);
+  }
+
+  const mtvN = v2norm(mtv);
+  const { rAP_perp, rBP_perp, velocity_AB } = calcCircleRelVectors(cA, cB, mtvN);
+
+  cA.basic.isGrounded = isCircleGrounded(cA.basic.angVelocity, velocity_AB, mtvN);
+  cB.basic.isGrounded = isCircleGrounded(cB.basic.angVelocity, v2scale(velocity_AB, -1), v2scale(mtvN, -1));
+
+  if (v2dot(velocity_AB, v2scale(mtvN, -1)) < 0) {
+    return calcCircleCollisionForces(cA, cB, mtvN, rAP_perp, rBP_perp, velocity_AB);
+  }
+  return { forceA: vec(0, 0), angForceA: 0, forceB: vec(0, 0), angForceB: 0 };
+}
+
+// ─── Öffentliche Dispatcher ───────────────────────────────────────────────────
+
+export function detectCollision(a: Shape, b: Shape): CollResult {
+  if (a instanceof Polygon && b instanceof Polygon) return detectCollisionPoly(a, b);
+  if (a instanceof Polygon && b instanceof Circle)  return detectCollisionCirclePoly(a, b);
+  if (a instanceof Circle  && b instanceof Polygon) return detectCollisionCirclePoly(b, a);
+  if (a instanceof Circle  && b instanceof Circle)  return detectCollisionCircle(a, b);
+  return NO_COLL;
+}
+
+export function resolveCollision(
+  a: Shape, b: Shape,
+  contacts: Vector[], mtv: Vector,
+): Forces {
+  if (a instanceof Polygon && b instanceof Polygon) return resolveCollisionPoly(a, b, contacts, mtv);
+  if (a instanceof Polygon && b instanceof Circle)  return resolveCollisionCirclePoly(a, b, contacts, mtv);
+  if (a instanceof Circle  && b instanceof Polygon) return resolveCollisionCirclePoly(b, a, contacts, mtv);
+  if (a instanceof Circle  && b instanceof Circle)  return resolveCollisionCircle(a, b, mtv);
+  return { forceA: vec(0, 0), angForceA: 0, forceB: vec(0, 0), angForceB: 0 };
 }
